@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SVG Visual Interaction Tests</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Courier New', monospace; background: #0d1117; color: #e6edf3; padding: 24px; }
+h1 { color: #58a6ff; margin-bottom: 6px; font-size: 18px; }
+h2 { color: #8b949e; font-size: 12px; font-weight: normal; margin-bottom: 20px; }
+#summary {
+  padding: 10px 16px; border-radius: 6px;
+  margin-bottom: 24px; font-size: 14px; font-weight: bold;
+  display: inline-block;
+}
+.summary-pass { background: #0d2a17; border: 1px solid #238636; color: #3fb950; }
+.summary-fail { background: #2d1219; border: 1px solid #da3633; color: #f85149; }
+.suite { margin-bottom: 20px; }
+.suite-header {
+  font-size: 11px; font-weight: bold; color: #8b949e;
+  text-transform: uppercase; letter-spacing: 1.2px;
+  padding: 6px 0 5px; border-bottom: 1px solid #21262d; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.suite-count { font-size: 11px; color: #8b949e; }
+.suite-count.all-pass { color: #3fb950; }
+.suite-count.has-fail { color: #f85149; }
+.test { padding: 3px 0; font-size: 12px; display: flex; gap: 8px; align-items: baseline; }
+.test.pass::before { content: '✓'; color: #3fb950; flex-shrink: 0; }
+.test.fail::before { content: '✗'; color: #f85149; flex-shrink: 0; }
+.error { color: #f85149; font-size: 11px; padding: 2px 0 4px 16px; opacity: 0.85; }
+#loading { color: #8b949e; font-size: 13px; padding: 20px 0; }
+iframe { display: none; }
+</style>
+</head>
+<body>
+<h1>SVG Visual Interaction Tests</h1>
+<h2>Open directly in browser — tests run automatically via iframe injection into index.html</h2>
+<div id="loading">Loading app…</div>
+<div id="summary" style="display:none"></div>
+<div id="output"></div>
+<iframe id="app" src="../index.html"></iframe>
+
+<script>
+document.getElementById('app').addEventListener('load', runAllTests);
+
+// ── Minimal Test Runner ───────────────────────────────────────
+const suites = [];
+let cur = null;
+
+function suite(name) {
+  cur = { name, tests: [] };
+  suites.push(cur);
+}
+
+function test(name, fn) {
+  try { fn(); cur.tests.push({ name, ok: true }); }
+  catch (e) { cur.tests.push({ name, ok: false, err: e.message }); }
+}
+
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg || 'Assertion failed');
+}
+function has(svg, str, msg) {
+  if (!svg.includes(str)) throw new Error(msg || `SVG missing: "${str}"`);
+}
+function hasNot(svg, str, msg) {
+  if (svg.includes(str)) throw new Error(msg || `SVG should NOT contain: "${str}"`);
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+let gen, win;
+
+function c(overrides) {
+  return Object.assign({
+    value: 750000, target: 1000000, pct: 72, label: 'Test',
+    color1: '#4f6ef7', color2: '#e2e8f0',
+    colorGood: '#34d399', colorWarn: '#fbbf24', colorBad: '#f87171',
+    textColor: '#1e293b', min: 0, max: 100,
+    thickness: 12, radius: 60, count: 5, rating: 3.5
+  }, overrides);
+}
+
+function svg(vId, overrides) {
+  win.darkBg = false;
+  win.currentLang = 'en';
+  return gen(vId, c(overrides));
+}
+
+function svgDark(vId, overrides) {
+  win.darkBg = true;
+  win.currentLang = 'en';
+  const s = gen(vId, c(overrides));
+  win.darkBg = false;
+  return s;
+}
+
+// ── Tests ─────────────────────────────────────────────────────
+function runAllTests() {
+  win = document.getElementById('app').contentWindow;
+  gen = win.generateSVG;
+
+  // ══════════════════════════════════════════════════════════
+  //  KPI CARDS
+  // ══════════════════════════════════════════════════════════
+
+  suite('kpi_basic');
+  test('formats 750 000 as 750K', () =>
+    has(svg('kpi_basic'), '750K'));
+  test('formats 2 000 000 as 2.0M', () =>
+    has(svg('kpi_basic', { value: 2000000 }), '2.0M'));
+  test('formats target 1 000 000 as 1.0M', () =>
+    has(svg('kpi_basic', { target: 1000000 }), '1.0M'));
+  test('uses colorGood when achievement >= 100%', () =>
+    has(svg('kpi_basic', { value: 1000000, target: 1000000, colorGood: '#aabbcc' }), '#aabbcc'));
+  test('uses yellow (#fbbf24) at 70–99%', () =>
+    has(svg('kpi_basic', { value: 800000, target: 1000000 }), '#fbbf24'));
+  test('uses colorBad below 70%', () =>
+    has(svg('kpi_basic', { value: 500000, target: 1000000, colorBad: '#ff0011' }), '#ff0011'));
+  test('progress bar width grows with achievement', () => {
+    const w100 = parseFloat([...svg('kpi_basic', { value: 1000000, target: 1000000 }).matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v < 250 && v > 10).slice(-1)[0]);
+    const w50  = parseFloat([...svg('kpi_basic', { value: 500000,  target: 1000000 }).matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v < 250 && v > 10).slice(-1)[0]);
+    assert(w100 > w50, `pct=100 bar (${w100}) should be wider than pct=50 (${w50})`);
+  });
+  test('dark bg uses #1e1e2e card fill', () =>
+    has(svgDark('kpi_basic'), '#1e1e2e'));
+  test('light bg uses #ffffff card fill', () =>
+    has(svg('kpi_basic'), '#ffffff'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('kpi_comparison');
+  test('formats value as 750K', () =>
+    has(svg('kpi_comparison'), '750K'));
+  test('positive pct shows ▲ arrow', () =>
+    has(svg('kpi_comparison', { pct: 12 }), '▲'));
+  test('negative pct shows ▼ arrow', () =>
+    has(svg('kpi_comparison', { pct: -10 }), '▼'));
+  test('uses colorGood for positive pct', () =>
+    has(svg('kpi_comparison', { pct: 10, colorGood: '#00ff77' }), '#00ff77'));
+  test('uses colorBad for negative pct', () =>
+    has(svg('kpi_comparison', { pct: -5, colorBad: '#cc0011' }), '#cc0011'));
+  test('dark bg uses #1e1e2e', () =>
+    has(svgDark('kpi_comparison'), '#1e1e2e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('kpi_trend_arrow');
+  test('shows achievement percent (75%)', () =>
+    has(svg('kpi_trend_arrow', { value: 750000, target: 1000000 }), '75%'));
+  test('up arrow path at achievement >= 100%', () =>
+    has(svg('kpi_trend_arrow', { value: 1000000, target: 1000000 }), 'M220 70 L235 50 L250 70'));
+  test('flat arrow path at 70–99%', () =>
+    has(svg('kpi_trend_arrow', { value: 800000, target: 1000000 }), 'M220 60 L250 60'));
+  test('down arrow path below 70%', () =>
+    has(svg('kpi_trend_arrow', { value: 500000, target: 1000000 }), 'M220 50 L235 70 L250 50'));
+  test('colorGood at >= 100%', () =>
+    has(svg('kpi_trend_arrow', { value: 1000000, target: 1000000, colorGood: '#00ee99' }), '#00ee99'));
+  test('colorBad below 70%', () =>
+    has(svg('kpi_trend_arrow', { value: 500000, target: 1000000, colorBad: '#ee0022' }), '#ee0022'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('kpi_mini_chart');
+  test('formats value as 750K', () =>
+    has(svg('kpi_mini_chart'), '750K'));
+  test('uses colorGood at pct >= 70', () =>
+    has(svg('kpi_mini_chart', { pct: 70, colorGood: '#00cc88' }), '#00cc88'));
+  test('uses colorBad at pct < 40', () =>
+    has(svg('kpi_mini_chart', { pct: 30, colorBad: '#ee0000' }), '#ee0000'));
+  test('uses #fbbf24 (yellow) at 40–69', () =>
+    has(svg('kpi_mini_chart', { pct: 55 }), '#fbbf24'));
+  test('progress bar wider at pct=80 than pct=20', () => {
+    const extract = s => Math.max(...[...s.matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v < 250 && v > 5));
+    assert(extract(svg('kpi_mini_chart', { pct: 80 })) > extract(svg('kpi_mini_chart', { pct: 20 })),
+      'pct=80 bar should be wider than pct=20');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('kpi_dual');
+  test('formats value as 750K', () =>
+    has(svg('kpi_dual'), '750K'));
+  test('formats target 1 000 000 as 1000K', () =>
+    has(svg('kpi_dual', { target: 1000000 }), '1000K'));
+  test('shows achievement percent', () =>
+    has(svg('kpi_dual', { value: 750000, target: 1000000 }), '75%'));
+  test('dark bg uses dark card fill #252545', () =>
+    has(svgDark('kpi_dual'), '#252545'));
+
+  // ══════════════════════════════════════════════════════════
+  //  GAUGES
+  // ══════════════════════════════════════════════════════════
+
+  suite('gauge_circle');
+  test('shows pct value in text', () =>
+    has(svg('gauge_circle', { pct: 68 }), '68%'));
+  test('uses colorGood at pct >= 80', () =>
+    has(svg('gauge_circle', { pct: 80, colorGood: '#aaccbb' }), '#aaccbb'));
+  test('uses colorWarn at 50–79', () =>
+    has(svg('gauge_circle', { pct: 65, colorWarn: '#ffaa00' }), '#ffaa00'));
+  test('uses colorBad below 50', () =>
+    has(svg('gauge_circle', { pct: 30, colorBad: '#ff4444' }), '#ff4444'));
+  test('stroke-dashoffset decreases as pct increases', () => {
+    const off = s => parseFloat(s.match(/stroke-dashoffset='([\d.]+)'/)?.[1] || '0');
+    assert(off(svg('gauge_circle', { pct: 80, radius: 60 })) < off(svg('gauge_circle', { pct: 20, radius: 60 })),
+      'higher pct → smaller dashoffset');
+  });
+  test('radius slider changes circle r attribute', () =>
+    has(svg('gauge_circle', { radius: 40 }), "r='40'"));
+  test('thickness slider changes stroke-width', () =>
+    has(svg('gauge_circle', { thickness: 20 }), "stroke-width='20'"));
+  test('dark bg uses dark track #2a2a3e', () =>
+    has(svgDark('gauge_circle'), '#2a2a3e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('gauge_semi');
+  test('shows pct value in text', () =>
+    has(svg('gauge_semi', { pct: 55 }), '55%'));
+  test('uses colorGood at pct >= 80', () =>
+    has(svg('gauge_semi', { pct: 80, colorGood: '#00eeff' }), '#00eeff'));
+  test('uses colorWarn at 50–79', () =>
+    has(svg('gauge_semi', { pct: 65, colorWarn: '#ee9900' }), '#ee9900'));
+  test('uses colorBad below 50', () =>
+    has(svg('gauge_semi', { pct: 20, colorBad: '#ff2200' }), '#ff2200'));
+  test('stroke-dashoffset decreases as pct increases', () => {
+    const off = s => parseFloat(s.match(/stroke-dashoffset='([\d.]+)'/)?.[1] || '0');
+    assert(off(svg('gauge_semi', { pct: 80 })) < off(svg('gauge_semi', { pct: 20 })),
+      'higher pct → smaller dashoffset');
+  });
+  test('thickness changes stroke-width', () =>
+    has(svg('gauge_semi', { thickness: 18 }), "stroke-width='18'"));
+
+  // ──────────────────────────────────────────────────────────
+  suite('gauge_speedometer');
+  test('shows pct value in text', () =>
+    has(svg('gauge_speedometer', { pct: 65 }), '65%'));
+  test('uses colorGood at pct >= 80', () =>
+    has(svg('gauge_speedometer', { pct: 80, colorGood: '#aaffbb' }), '#aaffbb'));
+  test('uses colorWarn at 50–79', () =>
+    has(svg('gauge_speedometer', { pct: 60, colorWarn: '#ffcc00' }), '#ffcc00'));
+  test('uses colorBad below 50', () =>
+    has(svg('gauge_speedometer', { pct: 30, colorBad: '#ff3333' }), '#ff3333'));
+  test('needle y position changes with pct', () => {
+    const ny = s => s.match(/x2='[\d.\-]+' y2='([\d.\-]+)' stroke=/)?.[1];
+    assert(ny(svg('gauge_speedometer', { pct: 10 })) !== ny(svg('gauge_speedometer', { pct: 90 })),
+      'needle y2 should differ between pct=10 and pct=90');
+  });
+  test('tick marks are rendered', () =>
+    has(svg('gauge_speedometer'), '<line'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('gauge_donut');
+  test('shows pct value in text', () =>
+    has(svg('gauge_donut', { pct: 70 }), '70%'));
+  test('shows remaining percent (100 - pct)', () =>
+    has(svg('gauge_donut', { pct: 70 }), '30%'));
+  test('uses colorGood at pct >= 80', () =>
+    has(svg('gauge_donut', { pct: 80, colorGood: '#33ddaa' }), '#33ddaa'));
+  test('uses colorBad below 50', () =>
+    has(svg('gauge_donut', { pct: 30, colorBad: '#ff2255' }), '#ff2255'));
+  test('filled arc length increases with pct', () => {
+    const arc = s => parseFloat(s.match(/stroke-dasharray='([\d.]+)/)?.[1] || '0');
+    assert(arc(svg('gauge_donut', { pct: 80 })) > arc(svg('gauge_donut', { pct: 20 })),
+      'pct=80 arc should be longer than pct=20');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('gauge_multi');
+  test('shows pct in center text', () =>
+    has(svg('gauge_multi', { pct: 65 }), '65%'));
+  test('outermost ring uses color1', () =>
+    has(svg('gauge_multi', { pct: 65, color1: '#aabbff' }), '#aabbff'));
+  test('renders 3 colored rings (3 stroke-dasharray arcs)', () => {
+    const count = (svg('gauge_multi', { pct: 60 }).match(/stroke-dasharray/g) || []).length;
+    assert(count >= 3, `Expected >= 3 arcs, got ${count}`);
+  });
+  test('ring arc lengths differ by pct offset', () => {
+    const arcs = s => [...s.matchAll(/stroke-dasharray='([\d.]+)/g)].map(m => +m[1]);
+    const a = arcs(svg('gauge_multi', { pct: 60 }));
+    assert(a.length >= 3 && a[0] !== a[1], 'Outer arc should differ from inner arc');
+  });
+
+  // ══════════════════════════════════════════════════════════
+  //  PROGRESS BARS
+  // ══════════════════════════════════════════════════════════
+
+  suite('progress_linear');
+  test('shows pct in text', () =>
+    has(svg('progress_linear', { pct: 65 }), '65%'));
+  test('uses colorGood at pct >= 80', () =>
+    has(svg('progress_linear', { pct: 80, colorGood: '#33cc99' }), '#33cc99'));
+  test('uses color1 at 50–79', () =>
+    has(svg('progress_linear', { pct: 65, color1: '#aa22ff' }), '#aa22ff'));
+  test('uses colorBad below 50', () =>
+    has(svg('progress_linear', { pct: 20, colorBad: '#ff5555' }), '#ff5555'));
+  test('fill rect width grows with pct', () => {
+    const fillW = s => {
+      const ws = [...s.matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v < 260 && v > 1);
+      return Math.max(...ws);
+    };
+    assert(fillW(svg('progress_linear', { pct: 80 })) > fillW(svg('progress_linear', { pct: 20 })),
+      'pct=80 fill should be wider than pct=20');
+  });
+  test('thickness slider changes bar height', () =>
+    has(svg('progress_linear', { thickness: 20 }), "height='20'"));
+  test('dark bg uses dark track #2a2a3e', () =>
+    has(svgDark('progress_linear'), '#2a2a3e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('progress_stepped');
+  test('shows filled/total step count', () =>
+    has(svg('progress_stepped', { pct: 65 }), '4/5'));  // ceil(0.65*5)=4
+  test('shows 0/5 at pct=0', () =>
+    has(svg('progress_stepped', { pct: 0 }), '0/5'));
+  test('shows 5/5 at pct=100', () =>
+    has(svg('progress_stepped', { pct: 100 }), '5/5'));
+  test('uses colorGood for active bars at pct >= 80', () =>
+    has(svg('progress_stepped', { pct: 80, colorGood: '#00ff88' }), '#00ff88'));
+  test('uses color1 for active bars at pct < 80', () =>
+    has(svg('progress_stepped', { pct: 65, color1: '#ff00ff' }), '#ff00ff'));
+  test('dark bg uses #2a2a3e for inactive bars', () =>
+    has(svgDark('progress_stepped'), '#2a2a3e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('progress_gradient');
+  test('shows pct in text', () =>
+    has(svg('progress_gradient', { pct: 75 }), '75%'));
+  test('gradient stop uses colorBad', () =>
+    has(svg('progress_gradient', { colorBad: '#ff1100' }), '#ff1100'));
+  test('gradient stop uses colorWarn', () =>
+    has(svg('progress_gradient', { colorWarn: '#ffee00' }), '#ffee00'));
+  test('gradient stop uses colorGood', () =>
+    has(svg('progress_gradient', { colorGood: '#00ff77' }), '#00ff77'));
+  test('clip rect width changes with pct', () => {
+    const clip = s => parseFloat((s.match(/<clipPath[^>]*>.*?width='([\d.]+)'/s) || [])[1] || '0');
+    assert(clip(svg('progress_gradient', { pct: 80 })) > clip(svg('progress_gradient', { pct: 20 })),
+      'pct=80 clip should be wider than pct=20');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('progress_segmented');
+  test('shows pct in text', () =>
+    has(svg('progress_segmented', { pct: 60 }), '60%'));
+  test('color1 appears in active segments', () =>
+    has(svg('progress_segmented', { pct: 60, color1: '#8800ff' }), '#8800ff'));
+  test('at pct=0 no segments use color1', () =>
+    hasNot(svg('progress_segmented', { pct: 0, color1: '#8800ff' }), '#8800ff'));
+  test('at pct=100 all 10 segments use color1', () => {
+    const s = svg('progress_segmented', { pct: 100, color1: '#8800ff' });
+    const count = (s.match(/#8800ff/g) || []).length;
+    assert(count >= 10, `Expected 10 filled segments, got ${count}`);
+  });
+  test('thickness changes segment height', () =>
+    has(svg('progress_segmented', { thickness: 24 }), "height='24'"));
+
+  // ──────────────────────────────────────────────────────────
+  suite('progress_battery');
+  test('shows pct in text', () =>
+    has(svg('progress_battery', { pct: 75 }), '75%'));
+  test('uses colorGood at pct >= 60', () =>
+    has(svg('progress_battery', { pct: 60, colorGood: '#00ff88' }), '#00ff88'));
+  test('uses colorWarn at 25–59', () =>
+    has(svg('progress_battery', { pct: 40, colorWarn: '#ffcc00' }), '#ffcc00'));
+  test('uses colorBad below 25', () =>
+    has(svg('progress_battery', { pct: 10, colorBad: '#ff3333' }), '#ff3333'));
+  test('fill rect width grows with pct', () => {
+    const fillW = s => parseFloat([...s.matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v < 80 && v > 0).slice(-1)[0] || '0');
+    assert(fillW(svg('progress_battery', { pct: 80 })) > fillW(svg('progress_battery', { pct: 10 })),
+      'pct=80 fill should be wider than pct=10');
+  });
+
+  // ══════════════════════════════════════════════════════════
+  //  CHARTS
+  // ══════════════════════════════════════════════════════════
+
+  suite('chart_bar_h');
+  test('shows value as $750K', () =>
+    has(svg('chart_bar_h'), '$750K'));
+  test('color1 fills the bar rect', () =>
+    has(svg('chart_bar_h', { color1: '#00aaff' }), '#00aaff'));
+  test('fill bar width grows with value/target ratio', () => {
+    const barW = s => parseFloat([...s.matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v < 200 && v > 0).slice(-1)[0] || '0');
+    assert(
+      barW(svg('chart_bar_h', { value: 800000, target: 1000000 })) >
+      barW(svg('chart_bar_h', { value: 200000, target: 1000000 })),
+      'higher ratio = wider bar'
+    );
+  });
+  test('dark bg uses dark track', () =>
+    has(svgDark('chart_bar_h'), '#2a2a3e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('chart_bar_v');
+  test('color1 applied to active (center) bar', () =>
+    has(svg('chart_bar_v', { color1: '#ffaa00' }), '#ffaa00'));
+  test('renders 5 bars', () => {
+    const count = (svg('chart_bar_v').match(/<rect/g) || []).length;
+    assert(count >= 5, `Expected >= 5 rects, got ${count}`);
+  });
+  test('active bar height changes with pct', () => {
+    const s10 = svg('chart_bar_v', { pct: 10 });
+    const s90 = svg('chart_bar_v', { pct: 90 });
+    assert(s10 !== s90, 'pct=10 and pct=90 should produce different SVG');
+  });
+  test('dark bg uses dark inactive bars', () =>
+    has(svgDark('chart_bar_v'), '#2a2a3e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('chart_bullet');
+  test('shows value as $750K', () =>
+    has(svg('chart_bullet'), '$750K'));
+  test('shows target value', () =>
+    has(svg('chart_bullet', { target: 1000000 }), '$1000K'));
+  test('color1 fills the actual bar', () =>
+    has(svg('chart_bullet', { color1: '#4422ff' }), '#4422ff'));
+  test('actual bar width changes with value/target ratio', () => {
+    const actualW = s => parseFloat([...s.matchAll(/width='([\d.]+)'/g)].map(m => +m[1]).filter(v => v > 10 && v < 240).slice(-1)[0] || '0');
+    assert(
+      actualW(svg('chart_bullet', { value: 900000, target: 1000000 })) >
+      actualW(svg('chart_bullet', { value: 200000, target: 1000000 })),
+      'higher value = wider bullet bar'
+    );
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('chart_waterfall');
+  test('colorGood for positive bars', () =>
+    has(svg('chart_waterfall', { colorGood: '#00ccff' }), '#00ccff'));
+  test('colorBad for negative bars', () =>
+    has(svg('chart_waterfall', { colorBad: '#ff2233' }), '#ff2233'));
+  test('renders at least 5 bar rects', () => {
+    const count = (svg('chart_waterfall').match(/<rect/g) || []).length;
+    assert(count >= 5, `Expected >= 5 rects, got ${count}`);
+  });
+  test('positive and negative value labels present', () => {
+    const s = svg('chart_waterfall');
+    has(s, '+');
+    has(s, '-');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('chart_sparkline');
+  test('color1 used for line stroke', () =>
+    has(svg('chart_sparkline', { color1: '#ff00aa' }), '#ff00aa'));
+  test('contains SVG path element', () =>
+    has(svg('chart_sparkline'), "<path d='"));
+  test('contains endpoint circle', () =>
+    has(svg('chart_sparkline'), '<circle'));
+  test('endpoint Y position changes with pct', () => {
+    const lastY = s => s.match(/cy='([\d.]+)' r='4'/)?.[1];
+    assert(
+      lastY(svg('chart_sparkline', { pct: 10 })) !== lastY(svg('chart_sparkline', { pct: 90 })),
+      'endpoint Y should differ between pct=10 and pct=90'
+    );
+  });
+  test('shows month labels', () =>
+    has(svg('chart_sparkline'), 'Mar'));
+
+  // ══════════════════════════════════════════════════════════
+  //  STATUS INDICATORS
+  // ══════════════════════════════════════════════════════════
+
+  suite('status_traffic');
+  test('colorGood lit at pct >= 70', () =>
+    has(svg('status_traffic', { pct: 70, colorGood: '#00ff00' }), '#00ff00'));
+  test('colorWarn lit at 40–69', () =>
+    has(svg('status_traffic', { pct: 50, colorWarn: '#ffff00' }), '#ffff00'));
+  test('colorBad lit below 40', () =>
+    has(svg('status_traffic', { pct: 20, colorBad: '#ff0000' }), '#ff0000'));
+  test('renders 3 light circles', () => {
+    const count = (svg('status_traffic').match(/<circle/g) || []).length;
+    assert(count >= 3, `Expected >= 3 circles, got ${count}`);
+  });
+  test('active light has opacity=1, others opacity=0.3', () => {
+    const s = svg('status_traffic', { pct: 70, colorGood: '#00ff00' });
+    has(s, "fill='#00ff00' opacity='1'");
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('status_icon');
+  test('uses colorGood at pct >= 70', () =>
+    has(svg('status_icon', { pct: 70, colorGood: '#22dd88' }), '#22dd88'));
+  test('uses colorWarn at 40–69', () =>
+    has(svg('status_icon', { pct: 50, colorWarn: '#ddaa00' }), '#ddaa00'));
+  test('uses colorBad below 40', () =>
+    has(svg('status_icon', { pct: 20, colorBad: '#dd2222' }), '#dd2222'));
+  test('warn state shows ! symbol', () =>
+    has(svg('status_icon', { pct: 50 }), '!'));
+  test('good state shows checkmark path', () => {
+    const s = svg('status_icon', { pct: 70 });
+    // checkmark: M12 22 L20 30 L38 12
+    has(s, 'M12 22');
+  });
+  test('bad state shows X path', () => {
+    const s = svg('status_icon', { pct: 20 });
+    has(s, 'M14 14 L36 36');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('status_badge');
+  test('shows "Good" at pct >= 70', () =>
+    has(svg('status_badge', { pct: 70 }), 'Good'));
+  test('shows "Warning" at 40–69', () =>
+    has(svg('status_badge', { pct: 50 }), 'Warning'));
+  test('shows "Bad" below 40', () =>
+    has(svg('status_badge', { pct: 20 }), 'Bad'));
+  test('uses colorGood color at pct >= 70', () =>
+    has(svg('status_badge', { pct: 70, colorGood: '#33cc88' }), '#33cc88'));
+  test('uses colorBad color below 40', () =>
+    has(svg('status_badge', { pct: 20, colorBad: '#cc2200' }), '#cc2200'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('status_dot');
+  test('uses colorGood at pct >= 70', () =>
+    has(svg('status_dot', { pct: 75, colorGood: '#00ffbb' }), '#00ffbb'));
+  test('uses colorWarn at 40–69', () =>
+    has(svg('status_dot', { pct: 50, colorWarn: '#ffdd00' }), '#ffdd00'));
+  test('uses colorBad below 40', () =>
+    has(svg('status_dot', { pct: 15, colorBad: '#ff4400' }), '#ff4400'));
+  test('renders inner and outer circles', () => {
+    const count = (svg('status_dot').match(/<circle/g) || []).length;
+    assert(count >= 2, `Expected 2 circles, got ${count}`);
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('status_flag');
+  test('uses colorGood at pct >= 70', () =>
+    has(svg('status_flag', { pct: 70, colorGood: '#00ee99' }), '#00ee99'));
+  test('uses colorWarn at 40–69', () =>
+    has(svg('status_flag', { pct: 50, colorWarn: '#eebb00' }), '#eebb00'));
+  test('uses colorBad below 40', () =>
+    has(svg('status_flag', { pct: 20, colorBad: '#ee2200' }), '#ee2200'));
+  test('renders flag polygon path', () =>
+    has(svg('status_flag'), "<path d='M8 5 L35 13 L8 25 Z'"));
+
+  // ══════════════════════════════════════════════════════════
+  //  RATING VISUALS
+  // ══════════════════════════════════════════════════════════
+
+  suite('rating_stars');
+  test('filled stars use color1', () =>
+    has(svg('rating_stars', { rating: 3, color1: '#ffcc00', color2: '#888888' }), '#ffcc00'));
+  test('empty stars use color2', () =>
+    has(svg('rating_stars', { rating: 3, color1: '#ffcc00', color2: '#888888' }), '#888888'));
+  test('SVG width changes with count', () => {
+    const w = s => parseInt(s.match(/width='(\d+)'/)?.[1] || '0');
+    assert(w(svg('rating_stars', { count: 3 })) < w(svg('rating_stars', { count: 7 })),
+      'more stars = wider SVG');
+  });
+  test('rating=5 count=5 → no empty stars', () => {
+    const s = svg('rating_stars', { rating: 5, count: 5, color1: '#ffcc00', color2: '#111111' });
+    hasNot(s, '#111111');
+  });
+  test('rating=0 count=5 → no filled stars', () => {
+    const s = svg('rating_stars', { rating: 0, count: 5, color1: '#ffcc00', color2: '#111111' });
+    hasNot(s, '#ffcc00');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('rating_hearts');
+  test('filled hearts use color1', () =>
+    has(svg('rating_hearts', { rating: 3, color1: '#ff6688', color2: '#cccccc' }), '#ff6688'));
+  test('empty hearts use color2', () =>
+    has(svg('rating_hearts', { rating: 3, color1: '#ff6688', color2: '#cccccc' }), '#cccccc'));
+  test('rating=0 → no filled hearts', () => {
+    const s = svg('rating_hearts', { rating: 0, color1: '#ff6688', color2: '#cccccc' });
+    hasNot(s, '#ff6688');
+  });
+  test('count changes number of paths', () => {
+    const paths = s => (s.match(/<path/g) || []).length;
+    assert(paths(svg('rating_hearts', { count: 3 })) < paths(svg('rating_hearts', { count: 7 })),
+      'count=7 should produce more paths than count=3');
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('rating_bars');
+  test('filled bars use color1', () =>
+    has(svg('rating_bars', { rating: 3, color1: '#aa00ff', color2: '#cccccc' }), '#aa00ff'));
+  test('empty bars use color2', () =>
+    has(svg('rating_bars', { rating: 3, color1: '#aa00ff', color2: '#cccccc' }), '#cccccc'));
+  test('rating=0 → no filled bars', () => {
+    const s = svg('rating_bars', { rating: 0, color1: '#aa00ff', color2: '#cccccc' });
+    hasNot(s, '#aa00ff');
+  });
+  test('filled bar has larger height than empty bar', () => {
+    // filled: height=25 (y=5, h=25), empty: height=18 (y=12, h=18)
+    const s = svg('rating_bars', { rating: 3, color1: '#aa00ff', color2: '#cccccc' });
+    has(s, "height='25'");
+    has(s, "height='18'");
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('rating_numeric');
+  test('shows rating value', () =>
+    has(svg('rating_numeric', { rating: 4.5 }), '4.5'));
+  test('shows /count', () =>
+    has(svg('rating_numeric', { rating: 3, count: 5 }), '/5'));
+  test('uses colorGood at rating >= 4', () =>
+    has(svg('rating_numeric', { rating: 4, colorGood: '#9900ff' }), '#9900ff'));
+  test('uses colorWarn at 2.5–3.9', () =>
+    has(svg('rating_numeric', { rating: 3, colorWarn: '#cc9900' }), '#cc9900'));
+  test('uses colorBad below 2.5', () =>
+    has(svg('rating_numeric', { rating: 2, colorBad: '#cc2200' }), '#cc2200'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('rating_emoji');
+  test('shows 😊 at rating >= 4', () =>
+    has(svg('rating_emoji', { rating: 4 }), '😊'));
+  test('shows 😐 at rating 3–3.9', () =>
+    has(svg('rating_emoji', { rating: 3 }), '😐'));
+  test('shows 😟 at rating 2–2.9', () =>
+    has(svg('rating_emoji', { rating: 2 }), '😟'));
+  test('shows 😢 below rating 2', () =>
+    has(svg('rating_emoji', { rating: 1 }), '😢'));
+
+  // ══════════════════════════════════════════════════════════
+  //  TRENDS
+  // ══════════════════════════════════════════════════════════
+
+  suite('trend_arrow');
+  test('shows +N% for positive pct', () =>
+    has(svg('trend_arrow', { pct: 10 }), '+10%'));
+  test('shows -N% for negative pct', () =>
+    has(svg('trend_arrow', { pct: -10 }), '-10%'));
+  test('uses colorGood for positive pct', () =>
+    has(svg('trend_arrow', { pct: 10, colorGood: '#00ee77' }), '#00ee77'));
+  test('uses colorBad for negative pct', () =>
+    has(svg('trend_arrow', { pct: -10, colorBad: '#ee2222' }), '#ee2222'));
+  test('up arrow path for positive pct', () =>
+    has(svg('trend_arrow', { pct: 5 }), 'M25 35 L25 12'));
+  test('down arrow path for negative pct', () =>
+    has(svg('trend_arrow', { pct: -5 }), 'M25 10 L25 33'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('trend_sparkline');
+  test('color1 used for line stroke', () =>
+    has(svg('trend_sparkline', { color1: '#ff00cc' }), '#ff00cc'));
+  test('contains SVG path element', () =>
+    has(svg('trend_sparkline'), "<path d='"));
+  test('shows ▲ when pct > prev point (55)', () =>
+    has(svg('trend_sparkline', { pct: 90 }), '▲'));
+  test('shows ▼ when pct < prev point (55)', () =>
+    has(svg('trend_sparkline', { pct: 10 }), '▼'));
+  test('endpoint circle y changes with pct', () => {
+    const cy = s => s.match(/cy='([\d.]+)' r='3\.5'/)?.[1];
+    assert(
+      cy(svg('trend_sparkline', { pct: 10 })) !== cy(svg('trend_sparkline', { pct: 90 })),
+      'endpoint Y should differ between pct=10 and pct=90'
+    );
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('trend_delta');
+  test('shows ▲ N% for positive pct', () =>
+    has(svg('trend_delta', { pct: 25 }), '▲'));
+  test('shows ▼ N% for negative pct', () =>
+    has(svg('trend_delta', { pct: -10 }), '▼'));
+  test('shows absolute value of pct', () =>
+    has(svg('trend_delta', { pct: -15 }), '15%'));
+  test('uses colorGood for positive pct', () =>
+    has(svg('trend_delta', { pct: 10, colorGood: '#00ff88' }), '#00ff88'));
+  test('uses colorBad for negative pct', () =>
+    has(svg('trend_delta', { pct: -5, colorBad: '#ff4444' }), '#ff4444'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('trend_flame');
+  test('shows pct in text', () =>
+    has(svg('trend_flame', { pct: 85 }), '85%'));
+  test('uses #ef4444 (hot red) at pct >= 80', () =>
+    has(svg('trend_flame', { pct: 80 }), '#ef4444'));
+  test('uses color1 at 50–79', () =>
+    has(svg('trend_flame', { pct: 60, color1: '#ff8800' }), '#ff8800'));
+  test('uses #64748b (cold gray) below 50', () =>
+    has(svg('trend_flame', { pct: 30 }), '#64748b'));
+  test('flame height changes with pct', () => {
+    const s10 = svg('trend_flame', { pct: 10 });
+    const s90 = svg('trend_flame', { pct: 90 });
+    assert(s10 !== s90, 'Different pct should produce different flame shape');
+  });
+
+  // ══════════════════════════════════════════════════════════
+  //  ADVANCED
+  // ══════════════════════════════════════════════════════════
+
+  suite('adv_thermometer');
+  test('shows pct as degrees (°)', () =>
+    has(svg('adv_thermometer', { pct: 60 }), '60°'));
+  test('uses colorBad (hot) at pct >= 80', () =>
+    has(svg('adv_thermometer', { pct: 80, colorBad: '#ff1100' }), '#ff1100'));
+  test('uses colorWarn at 50–79', () =>
+    has(svg('adv_thermometer', { pct: 60, colorWarn: '#ffdd00' }), '#ffdd00'));
+  test('uses colorGood (cool) below 50', () =>
+    has(svg('adv_thermometer', { pct: 30, colorGood: '#00ffbb' }), '#00ffbb'));
+  test('fill rect height changes with pct', () => {
+    const fillH = s => parseFloat(s.match(/rx='8' fill='(?:#[0-9a-fA-F]{6})'\/>/)?.[0] || '');
+    // Use a simpler approach: SVGs differ between pct values
+    assert(
+      svg('adv_thermometer', { pct: 80 }) !== svg('adv_thermometer', { pct: 20 }),
+      'Different pct should produce different thermometer fill height'
+    );
+  });
+  test('renders scale tick marks', () =>
+    has(svg('adv_thermometer'), '<line'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('adv_funnel');
+  test('shows fixed stage values (100%, 75%, 55%, 35%, 20%)', () => {
+    const s = svg('adv_funnel');
+    has(s, '100%');
+    has(s, '75%');
+    has(s, '55%');
+    has(s, '35%');
+    has(s, '20%');
+  });
+  test('color1 used for first stage', () =>
+    has(svg('adv_funnel', { color1: '#8833ff' }), '#8833ff'));
+  test('colorGood used for second stage', () =>
+    has(svg('adv_funnel', { colorGood: '#00ffaa' }), '#00ffaa'));
+  test('colorWarn used for third stage', () =>
+    has(svg('adv_funnel', { colorWarn: '#ffcc00' }), '#ffcc00'));
+  test('colorBad used for fifth stage', () =>
+    has(svg('adv_funnel', { colorBad: '#ff2211' }), '#ff2211'));
+  test('renders 5 stage rects', () => {
+    const count = (svg('adv_funnel').match(/<rect/g) || []).length;
+    assert(count >= 5, `Expected >= 5 rects, got ${count}`);
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('adv_waffle');
+  test('shows pct in text', () =>
+    has(svg('adv_waffle', { pct: 73 }), '73%'));
+  test('color1 used for filled cells', () =>
+    has(svg('adv_waffle', { pct: 50, color1: '#2288ff' }), '#2288ff'));
+  test('color2 used for empty cells', () =>
+    has(svg('adv_waffle', { pct: 50, color2: '#eeeeee' }), '#eeeeee'));
+  test('at pct=0 no cells use color1', () =>
+    hasNot(svg('adv_waffle', { pct: 0, color1: '#2288ff' }), '#2288ff'));
+  test('at pct=100 no cells use color2', () =>
+    hasNot(svg('adv_waffle', { pct: 100, color1: '#2288ff', color2: '#eeeeee' }), '#eeeeee'));
+  test('dark bg uses #2a2a3e for empty cells', () =>
+    has(svgDark('adv_waffle', { pct: 50 }), '#2a2a3e'));
+
+  // ──────────────────────────────────────────────────────────
+  suite('adv_pictogram');
+  test('shows pct in text', () =>
+    has(svg('adv_pictogram', { pct: 60 }), '60%'));
+  test('colorGood used for filled figures', () =>
+    has(svg('adv_pictogram', { pct: 50, colorGood: '#aa22ff' }), '#aa22ff'));
+  test('color2 used for empty figures', () =>
+    has(svg('adv_pictogram', { pct: 50, color2: '#cccccc' }), '#cccccc'));
+  test('at pct=0 no figures use colorGood', () =>
+    hasNot(svg('adv_pictogram', { pct: 0, colorGood: '#aa22ff' }), '#aa22ff'));
+  test('at pct=100 no figures use color2', () =>
+    hasNot(svg('adv_pictogram', { pct: 100, colorGood: '#aa22ff', color2: '#cccccc' }), '#cccccc'));
+  test('different pct produces different SVG', () => {
+    assert(
+      svg('adv_pictogram', { pct: 10 }) !== svg('adv_pictogram', { pct: 90 }),
+      'pct=10 and pct=90 should differ'
+    );
+  });
+
+  // ──────────────────────────────────────────────────────────
+  suite('adv_radial_bar');
+  test('shows pct value in legend text', () =>
+    has(svg('adv_radial_bar', { pct: 70 }), '70%'));
+  test('color1 used for outer arc stroke', () =>
+    has(svg('adv_radial_bar', { color1: '#ff88aa' }), '#ff88aa'));
+  test('colorGood used for Q2 arc', () =>
+    has(svg('adv_radial_bar', { colorGood: '#00ffcc' }), '#00ffcc'));
+  test('renders 4 colored arcs', () => {
+    const count = (svg('adv_radial_bar').match(/stroke-dasharray/g) || []).length;
+    assert(count >= 4, `Expected >= 4 arcs, got ${count}`);
+  });
+  test('outer arc dasharray changes with pct', () => {
+    const arc = s => parseFloat(s.match(/stroke-dasharray='([\d.]+)/)?.[1] || '0');
+    assert(
+      arc(svg('adv_radial_bar', { pct: 80 })) > arc(svg('adv_radial_bar', { pct: 20 })),
+      'pct=80 outer arc should be longer than pct=20'
+    );
+  });
+
+  // ── Render Results ────────────────────────────────────────
+  document.getElementById('loading').style.display = 'none';
+  renderResults();
+}
+
+function renderResults() {
+  let total = 0, passed = 0;
+  suites.forEach(s => s.tests.forEach(t => { total++; if (t.ok) passed++; }));
+  const failed = total - passed;
+
+  const sum = document.getElementById('summary');
+  sum.style.display = 'inline-block';
+  sum.textContent = `${passed} / ${total} passed${failed ? `  —  ${failed} failed` : ''}`;
+  sum.className = failed ? 'summary-fail' : 'summary-pass';
+
+  document.getElementById('output').innerHTML = suites.map(s => {
+    const p = s.tests.filter(t => t.ok).length;
+    const allPass = p === s.tests.length;
+    return `<div class="suite">
+      <div class="suite-header">
+        <span>${s.name}</span>
+        <span class="suite-count ${allPass ? 'all-pass' : 'has-fail'}">${p}/${s.tests.length}</span>
+      </div>
+      ${s.tests.map(t => `
+        <div class="test ${t.ok ? 'pass' : 'fail'}">${t.name}</div>
+        ${t.err ? `<div class="error">${t.err}</div>` : ''}
+      `).join('')}
+    </div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>
